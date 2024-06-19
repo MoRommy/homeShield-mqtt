@@ -3,6 +3,7 @@ import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
 from gpiozero import PWMLED
 from enum import Enum
+import base64
 import json
 import datetime
 import threading
@@ -15,7 +16,7 @@ EVENTS_PATH = "events.txt"
 DEVICE_ID = "1001"
 
 mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-led = PWMLED(12, active_high=False)
+led = PWMLED(12, active_high=True)
 
 
 ###############################################################################
@@ -23,29 +24,40 @@ led = PWMLED(12, active_high=False)
 ###############################################################################
 
 class Event():
-    def __init__(self, action, commander):
+    def __init__(self, action, commander, photo):
         self.action = action
         self.commander = commander
         self.timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-        self.photo = None
+        self.photo = base64.b64encode(photo).decode('utf-8')
+
+    def to_dict(self):
+        return {
+            "action": self.action,
+            "commander": self.commander,
+            "timestamp": self.timestamp,
+            "photo": self.photo
+        }
 
     def __str__(self):
-        return json.dumps(self)
-    
+        return json.dumps(self.to_dict())
+
     def log(self):
         with open(EVENTS_PATH, 'a') as file:
-            file.write(self + "\n")
+            file.write(str(self) + "\n")
 
 def logEvent(action, commander):
-    event = Event(action, commander)
-    event.log
     #TODO: Capture & save photo
+    print("opennn")
+    photo = open("test.jpg", "rb").read()
+    event = Event(action, commander, photo)
+    print("eveent")
+    event.log()
 
 def getEvents():
     events = []
     with open(EVENTS_PATH) as events_file:
         for event in events_file:
-            events.append(event.strip())
+            events.append(event)
     return events
 
 #
@@ -53,7 +65,7 @@ def getEvents():
 #
 def on_tc_get_device_history(mosq, obj, msg):
     events = getEvents()
-    for event in events:
+    for event in reversed(events):
         publish.single("TM/" + DEVICE_ID + "/device_history", event, hostname=MQTT_HOST)
 
 #
@@ -97,16 +109,20 @@ mqttc.message_callback_add(DEVICE_ID + "/get_device_status", on_tc_get_device_st
 def close_door():
     global door_state
     door_state = DoorState.CLOSING
+    publish.single("TM/" + DEVICE_ID + "/device_status", str(door_state), hostname=MQTT_HOST)
     led.pulse(fade_in_time = 0, fade_out_time=3, n=1, background=False)
     led.off()
     door_state = DoorState.CLOSED
+    publish.single("TM/" + DEVICE_ID + "/device_status", str(door_state), hostname=MQTT_HOST)
 
 def open_door():
     global door_state
     door_state = DoorState.OPENING
+    publish.single("TM/" + DEVICE_ID + "/device_status", str(door_state), hostname=MQTT_HOST)
     led.pulse(fade_in_time = 3, fade_out_time=0, n=1, background=False)
     led.on()
     door_state = DoorState.OPEN
+    publish.single("TM/" + DEVICE_ID + "/device_status", str(door_state), hostname=MQTT_HOST)
 
 def on_tc_open_thread():
     logEvent("Open", "App User")
